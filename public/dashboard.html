@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crowd Lights — Session Setup</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --line: #262b33;
+    --text: #e8eaed;
+    --muted: #8a909c;
+    --accent: #ff5a36;
+    --accent-dim: #7a2c1c;
+    --mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    padding: 32px 20px 80px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .sub { color: var(--muted); font-size: 15px; margin-bottom: 36px; }
+
+  .setup-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 28px;
+    display: flex;
+    align-items: flex-end;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .field label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .field input {
+    background: #0b0d10;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 20px;
+    font-family: var(--mono);
+    padding: 10px 14px;
+    width: 110px;
+  }
+  .field input:focus { outline: none; border-color: var(--accent); }
+  .presets { display: flex; gap: 8px; }
+  .preset-btn {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 9px 14px;
+    font-family: var(--mono);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .preset-btn:hover { border-color: var(--accent); color: var(--text); }
+  .generate-btn {
+    margin-left: auto;
+    background: var(--accent);
+    color: #1a0a05;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 22px;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    transition: filter .15s;
+  }
+  .generate-btn:hover { filter: brightness(1.08); }
+  .generate-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .status-line {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+    min-height: 16px;
+  }
+  .status-line.connected { color: #4caf7d; }
+  .status-line.error { color: #ff5a5a; }
+
+  .grid {
+    margin-top: 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .qr-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    text-align: center;
+  }
+  .qr-card .section-name {
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 2px;
+  }
+  .qr-card .section-id {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .qr-canvas-wrap {
+    background: #fff;
+    border-radius: 8px;
+    padding: 10px;
+    display: inline-block;
+  }
+  .qr-link {
+    display: block;
+    margin-top: 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    word-break: break-all;
+    text-decoration: none;
+  }
+  .qr-link:hover { color: var(--accent); }
+
+  .next-bar {
+    margin-top: 40px;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--panel);
+    border: 1px solid var(--accent-dim);
+    border-radius: 14px;
+    padding: 20px 24px;
+  }
+  .next-bar.visible { display: flex; }
+  .next-bar p { margin: 0; color: var(--muted); font-size: 14px; }
+  .next-bar a {
+    background: var(--accent);
+    color: #1a0a05;
+    text-decoration: none;
+    font-weight: 700;
+    padding: 12px 22px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Crowd Lights · Session Setup</div>
+  <h1>How many sections tonight?</h1>
+  <p class="sub">Each section gets its own QR code. Point a section of the crowd at the matching code — their phones become that section's light panel.</p>
+
+  <div class="setup-card">
+    <div class="field">
+      <label for="count-input">Sections</label>
+      <input id="count-input" type="number" min="1" max="50" value="4" />
+    </div>
+    <div class="presets">
+      <button class="preset-btn" data-count="1">1 · Single</button>
+      <button class="preset-btn" data-count="2">2 · L / R</button>
+      <button class="preset-btn" data-count="4">4 · F/R/L/R</button>
+    </div>
+    <button class="generate-btn" id="generate-btn">Generate QR codes</button>
+  </div>
+  <div class="status-line" id="status-line">Not connected.</div>
+
+  <div class="grid" id="qr-grid"></div>
+
+  <div class="next-bar" id="next-bar">
+    <p>Session is live. Open the control panel to start sending colors.</p>
+    <a href="/control">Open control panel →</a>
+  </div>
+</div>
+
+<script>
+(function () {
+  const statusLine = document.getElementById('status-line');
+  const countInput = document.getElementById('count-input');
+  const generateBtn = document.getElementById('generate-btn');
+  const qrGrid = document.getElementById('qr-grid');
+  const nextBar = document.getElementById('next-bar');
+
+  let wsUrl     = null;
+  let publicUrl = null;
+  let ws;
+
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => { countInput.value = btn.dataset.count; });
+  });
+
+  // Fetch server config first so QR codes encode the correct public URL,
+  // not just location.host (which may be an internal Azure address).
+  async function loadConfig() {
+    try {
+      const res = await fetch('/config');
+      const cfg = await res.json();
+      wsUrl     = cfg.wsUrl;
+      publicUrl = cfg.publicUrl;
+    } catch {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      wsUrl     = `${proto}://${location.host}/ws`;
+      publicUrl = `${location.protocol}//${location.host}`;
+    }
+    connect();
+  }
+
+  function connect() {
+    ws = new WebSocket(wsUrl);
+
+    ws.addEventListener('open', () => {
+      statusLine.textContent = 'Connected to server.';
+      statusLine.className   = 'status-line connected';
+      generateBtn.disabled   = false;
+    });
+
+    ws.addEventListener('close', () => {
+      statusLine.textContent = 'Disconnected. Retrying…';
+      statusLine.className   = 'status-line error';
+      generateBtn.disabled   = true;
+      setTimeout(connect, 1500);
+    });
+
+    ws.addEventListener('error', () => {
+      statusLine.textContent = 'Connection error.';
+      statusLine.className   = 'status-line error';
+    });
+
+    ws.addEventListener('message', (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'sections-ready') {
+        renderQRCodes(msg.sections);
+        nextBar.classList.add('visible');
+        statusLine.textContent = `${msg.count} section(s) initialized.`;
+        statusLine.className   = 'status-line connected';
+      }
+    });
+  }
+
+  generateBtn.addEventListener('click', () => {
+    const count = Math.max(1, Math.min(50, parseInt(countInput.value, 10) || 1));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'init-sections', count }));
+    }
+  });
+
+  function renderQRCodes(sections) {
+    qrGrid.innerHTML = '';
+    // Use the server-reported public URL so QR codes work outside the local LAN.
+    const baseUrl = `${publicUrl}/phone`;
+
+    sections.forEach((section) => {
+      const url = `${baseUrl}?section=${section.id}`;
+
+      const card    = document.createElement('div');
+      card.className = 'qr-card';
+
+      const name    = document.createElement('div');
+      name.className = 'section-name';
+      name.textContent = section.name;
+
+      const idLabel    = document.createElement('div');
+      idLabel.className = 'section-id';
+      idLabel.textContent = `SECTION ${section.id}`;
+
+      const qrWrap    = document.createElement('div');
+      qrWrap.className = 'qr-canvas-wrap';
+
+      const link    = document.createElement('a');
+      link.className = 'qr-link';
+      link.href      = url;
+      link.textContent = url.replace(/^https?:\/\//, '');
+      link.target    = '_blank';
+
+      card.appendChild(name);
+      card.appendChild(idLabel);
+      card.appendChild(qrWrap);
+      card.appendChild(link);
+      qrGrid.appendChild(card);
+
+      // eslint-disable-next-line no-undef
+      new QRCode(qrWrap, {
+        text: url,
+        width: 160, height: 160,
+        colorDark: '#0b0d10', colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M,
+      });
+    });
+  }
+
+  loadConfig();
+})();
+</script>
+</body>
+</html>

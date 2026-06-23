@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crowd Lights — Control</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-2: #191d24;
+    --line: #262b33;
+    --text: #e8eaed;
+    --muted: #8a909c;
+    --accent: #ff5a36;
+    --green: #4caf7d;
+    --mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    padding: 24px 20px 100px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 { font-size: 26px; font-weight: 700; margin: 4px 0 0; letter-spacing: -0.01em; }
+  .conn-badge {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 7px 12px;
+    border-radius: 100px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .conn-badge.connected { color: var(--green); border-color: #1f5c3f; }
+  .conn-badge.error     { color: #ff5a5a;      border-color: #5c1f1f; }
+
+  section.block {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px;
+    margin-bottom: 20px;
+  }
+  .block-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  /* ── Per-section color rows ──────────────────────────────── */
+  .section-color-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .section-color-card {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .section-color-card .sc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .section-color-card .sc-name {
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .section-color-card .sc-meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .swatch-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.15);
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .sc-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  input[type="color"] {
+    width: 44px; height: 44px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: none;
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .sc-swatch-row {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .sc-swatch-btn {
+    width: 26px; height: 26px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.12);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .sc-swatch-btn:hover { outline: 2px solid var(--text); outline-offset: 2px; }
+  .apply-section-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: border-color .12s, color .12s;
+    white-space: nowrap;
+  }
+  .apply-section-btn:hover { border-color: var(--accent); color: var(--text); }
+
+  /* ── Apply-all row ───────────────────────────────────────── */
+  .apply-all-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .apply-all-btn {
+    background: var(--accent);
+    color: #1a0a05;
+    border: none;
+    border-radius: 8px;
+    padding: 11px 20px;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .apply-all-btn:hover { filter: brightness(1.08); }
+  .apply-all-note { font-size: 12px; color: var(--muted); }
+
+  /* ── Pattern library ─────────────────────────────────────── */
+  .pattern-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .pattern-card {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    cursor: pointer;
+    transition: border-color .15s, transform .1s;
+  }
+  .pattern-card:hover { border-color: var(--accent); }
+  .pattern-card:active { transform: scale(0.98); }
+  .pattern-card .pname { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .pattern-card .pdesc { font-size: 12px; color: var(--muted); line-height: 1.4; }
+  .pattern-card.firing { border-color: var(--green); }
+
+  .pattern-note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 14px;
+    line-height: 1.5;
+  }
+
+  .stop-btn {
+    margin-top: 16px;
+    width: 100%;
+    background: transparent;
+    border: 1px solid #5c1f1f;
+    color: #ff8a8a;
+    border-radius: 8px;
+    padding: 12px;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .stop-btn:hover { background: rgba(255,90,90,0.08); }
+
+  .lead-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+  }
+  .lead-control input[type="range"] { width: 160px; }
+
+  .empty-note { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top-bar">
+    <div>
+      <div class="eyebrow">Crowd Lights · Control</div>
+      <h1>Live session control</h1>
+    </div>
+    <div class="conn-badge" id="conn-badge">Connecting…</div>
+  </div>
+
+  <!-- Per-section colors -->
+  <section class="block">
+    <div class="block-title">Section colors</div>
+    <div class="section-color-grid" id="section-color-grid">
+      <p class="empty-note">No sections yet — go to the dashboard first.</p>
+    </div>
+    <div class="apply-all-row">
+      <button class="apply-all-btn" id="apply-all-btn">Apply all section colors</button>
+      <span class="apply-all-note">Sends each section its own color instantly.</span>
+    </div>
+  </section>
+
+  <!-- Synchronized patterns (shared — uses each section's own color) -->
+  <section class="block">
+    <div class="block-title">Synchronized patterns</div>
+    <p class="pattern-note">
+      Patterns run on all sections simultaneously. Each section uses its own color set above —
+      so Front can pulse red while Left strobes blue.
+    </p>
+    <div class="pattern-grid" id="pattern-grid"></div>
+    <div class="lead-control">
+      <label for="lead-ms">Sync lead time</label>
+      <input type="range" id="lead-ms" min="200" max="2000" step="100" value="500" />
+      <span id="lead-ms-label">500 ms</span>
+    </div>
+    <button class="stop-btn" id="stop-btn">Stop pattern / blackout all</button>
+  </section>
+</div>
+
+<script>
+(function () {
+  const connBadge       = document.getElementById('conn-badge');
+  const colorGrid       = document.getElementById('section-color-grid');
+  const applyAllBtn     = document.getElementById('apply-all-btn');
+  const patternGrid     = document.getElementById('pattern-grid');
+  const stopBtn         = document.getElementById('stop-btn');
+  const leadMsSlider    = document.getElementById('lead-ms');
+  const leadMsLabel     = document.getElementById('lead-ms-label');
+
+  const PRESET_COLORS = [
+    '#ff5a36', '#ff2d78', '#9b5de5', '#4361ee', '#00b4d8',
+    '#06d6a0', '#ffd166', '#fb8500', '#ffffff', '#000000',
+  ];
+
+  // sectionColors: { [id]: string } — the current color per section (from the pickers)
+  let sections     = [];
+  let sectionColors = {}; // id -> hex color string
+  let ws;
+  let wsUrl = null; // resolved from /config
+
+  // ── Config fetch ────────────────────────────────────────────────────
+  async function loadConfig() {
+    try {
+      const res  = await fetch('/config');
+      const cfg  = await res.json();
+      wsUrl = cfg.wsUrl;
+    } catch {
+      // Fall back to deriving from current location (local dev)
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      wsUrl = `${proto}://${location.host}/ws`;
+    }
+    connect();
+  }
+
+  // ── WebSocket ────────────────────────────────────────────────────────
+  function connect() {
+    ws = new WebSocket(wsUrl);
+
+    ws.addEventListener('open', () => {
+      connBadge.textContent = 'Connected';
+      connBadge.className   = 'conn-badge connected';
+      ws.send(JSON.stringify({ type: 'operator-join' }));
+    });
+
+    ws.addEventListener('close', () => {
+      connBadge.textContent = 'Disconnected — retrying…';
+      connBadge.className   = 'conn-badge error';
+      setTimeout(connect, 1500);
+    });
+
+    ws.addEventListener('message', (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'sections-ready' || msg.type === 'section-update') {
+        sections = msg.sections;
+        // Preserve any colors already chosen; default new sections to their last known color.
+        sections.forEach((s) => {
+          if (!sectionColors[s.id]) sectionColors[s.id] = s.lastColor || '#ff5a36';
+        });
+        renderColorGrid();
+      }
+    });
+  }
+
+  // ── Per-section color grid ───────────────────────────────────────────
+  function renderColorGrid() {
+    if (!sections.length) {
+      colorGrid.innerHTML = '<p class="empty-note">No sections yet — go to the dashboard first.</p>';
+      return;
+    }
+    colorGrid.innerHTML = '';
+    sections.forEach((s) => {
+      const color = sectionColors[s.id] || '#ff5a36';
+
+      const card = document.createElement('div');
+      card.className = 'section-color-card';
+      card.dataset.sectionId = s.id;
+
+      // Header: name + live connection count
+      const header = document.createElement('div');
+      header.className = 'sc-header';
+      header.innerHTML = `
+        <span class="sc-name">${s.name}</span>
+        <span class="sc-meta">
+          <span class="swatch-dot" style="background:${s.lastColor}"></span>
+          ${s.connected} connected
+        </span>
+      `;
+
+      // Color picker + "Apply" button
+      const pickerRow = document.createElement('div');
+      pickerRow.className = 'sc-picker-row';
+
+      const picker = document.createElement('input');
+      picker.type  = 'color';
+      picker.value = color;
+      picker.dataset.sectionId = s.id;
+      picker.addEventListener('input', () => {
+        sectionColors[s.id] = picker.value;
+      });
+
+      const applyBtn = document.createElement('button');
+      applyBtn.className   = 'apply-section-btn';
+      applyBtn.textContent = 'Apply';
+      applyBtn.addEventListener('click', () => {
+        sendColorForSection(s.id, sectionColors[s.id]);
+      });
+
+      pickerRow.appendChild(picker);
+      pickerRow.appendChild(applyBtn);
+
+      // Quick-swatch row
+      const swatchRow = document.createElement('div');
+      swatchRow.className = 'sc-swatch-row';
+      PRESET_COLORS.forEach((c) => {
+        const btn = document.createElement('button');
+        btn.className        = 'sc-swatch-btn';
+        btn.style.background = c;
+        btn.title            = c;
+        btn.addEventListener('click', () => {
+          picker.value        = c;
+          sectionColors[s.id] = c;
+          sendColorForSection(s.id, c);
+        });
+        swatchRow.appendChild(btn);
+      });
+
+      card.appendChild(header);
+      card.appendChild(pickerRow);
+      card.appendChild(swatchRow);
+      colorGrid.appendChild(card);
+    });
+  }
+
+  // Send a single section's color immediately (no scheduling).
+  function sendColorForSection(sectionId, color) {
+    ws.send(JSON.stringify({
+      type: 'set-color',
+      updates: [{ sectionId, color }],
+    }));
+  }
+
+  // Send all sections' colors in one batch message.
+  applyAllBtn.addEventListener('click', () => {
+    const updates = sections.map((s) => ({
+      sectionId: s.id,
+      color: sectionColors[s.id] || '#000000',
+    }));
+    ws.send(JSON.stringify({ type: 'set-color', updates }));
+  });
+
+  // ── Helpers ──────────────────────────────────────────────────────────
+  leadMsSlider.addEventListener('input', () => {
+    leadMsLabel.textContent = `${leadMsSlider.value} ms`;
+  });
+  function currentLeadMs() { return Number(leadMsSlider.value); }
+
+  // Build a sectionColors map from current picker state.
+  function currentSectionColors() {
+    const map = {};
+    sections.forEach((s) => { map[s.id] = sectionColors[s.id] || '#ff5a36'; });
+    return map;
+  }
+
+  // ── Pattern library ──────────────────────────────────────────────────
+  // Each pattern sends a scheduled-command for ALL sections.
+  // The server injects each section's own color (from sectionColors) before delivering.
+  const PATTERNS = [
+    {
+      id: 'solid',
+      name: 'Solid wash',
+      desc: 'Each section snaps to its own color at the same instant.',
+      build: () => ({ mode: 'solid' }),
+    },
+    {
+      id: 'strobe',
+      name: 'Strobe',
+      desc: 'Rapid flash between each section\'s color and black. Photosensitivity risk.',
+      build: () => ({ mode: 'strobe', intervalMs: 90, durationMs: 4000 }),
+    },
+    {
+      id: 'pulse',
+      name: 'Pulse / breathe',
+      desc: 'Smooth sine fade in and out.',
+      build: () => ({ mode: 'pulse', periodMs: 1800, durationMs: 9000 }),
+    },
+    {
+      id: 'heartbeat',
+      name: 'Heartbeat',
+      desc: 'Double-pulse "lub-dub" flash, repeating.',
+      build: () => ({ mode: 'heartbeat', periodMs: 1100, durationMs: 8800 }),
+    },
+    {
+      id: 'chase',
+      name: 'Chase wave',
+      desc: 'Sections light up in sequence around the venue, each in its own color.',
+      build: () => ({ mode: 'chase', order: sections.map(s => s.id), stepMs: 180, loops: 4 }),
+    },
+    {
+      id: 'bounce',
+      name: 'Color bounce',
+      desc: 'A point of light ping-pongs across sections.',
+      build: () => ({ mode: 'bounce', order: sections.map(s => s.id), stepMs: 160, loops: 3 }),
+    },
+    {
+      id: 'alternate',
+      name: 'Alternate (odd/even)',
+      desc: 'Odd and even sections alternate between their color and black.',
+      build: () => ({
+        mode: 'alternate',
+        colorB: '#000000', // colorA comes from per-section injection
+        order: sections.map(s => s.id), intervalMs: 300, durationMs: 6000,
+      }),
+    },
+    {
+      id: 'rainbow',
+      name: 'Rainbow cycle',
+      desc: 'Hue rotates continuously — overrides section colors for this pattern.',
+      build: () => ({ mode: 'rainbow', periodMs: 4000, durationMs: 12000 }),
+    },
+    {
+      id: 'sparkle',
+      name: 'Random sparkle',
+      desc: 'Each phone flickers between its section color and white/black.',
+      build: () => ({ mode: 'sparkle', intervalMs: 220, durationMs: 8000 }),
+    },
+    {
+      id: 'countdown',
+      name: 'Countdown flash',
+      desc: 'Flashes N times, accelerating, then holds solid. Built for a drop.',
+      build: () => ({ mode: 'countdown', flashes: 5 }),
+    },
+    {
+      id: 'wave-reverse',
+      name: 'Directional wave ←',
+      desc: 'Chase in reverse order.',
+      build: () => ({
+        mode: 'chase', order: sections.map(s => s.id).reverse(), stepMs: 220, loops: 2,
+      }),
+    },
+    {
+      id: 'buildup',
+      name: 'Build-up fade',
+      desc: 'Slow fade from black to each section\'s color over 8 seconds.',
+      build: () => ({ mode: 'buildup', durationMs: 8000 }),
+    },
+  ];
+
+  PATTERNS.forEach((p) => {
+    const card = document.createElement('div');
+    card.className = 'pattern-card';
+    card.innerHTML = `<div class="pname">${p.name}</div><div class="pdesc">${p.desc}</div>`;
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.pattern-card').forEach(c => c.classList.remove('firing'));
+      card.classList.add('firing');
+      ws.send(JSON.stringify({
+        type: 'scheduled-command',
+        targets: 'all',
+        command: p.build(),
+        sectionColors: currentSectionColors(), // per-section color map
+        leadMs: currentLeadMs(),
+      }));
+      setTimeout(() => card.classList.remove('firing'), 600);
+    });
+    patternGrid.appendChild(card);
+  });
+
+  stopBtn.addEventListener('click', () => {
+    ws.send(JSON.stringify({
+      type: 'scheduled-command',
+      targets: 'all',
+      command: { mode: 'solid', color: '#000000' },
+      leadMs: 200,
+    }));
+  });
+
+  loadConfig();
+})();
+</script>
+</body>
+</html>
