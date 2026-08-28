@@ -20,7 +20,7 @@ const { WebSocketServer } = require('ws');
 
 const PORT       = process.env.PORT || 3000;
 const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
-const REDIS_URL  = process.env.REDIS_URL || '';
+const REDIS_URL = process.env.UPSTASH_REDIS_URL || '';
 
 // ---------------------------------------------------------------------------
 // Redis Pub/Sub — optional. When REDIS_URL is set, all cross-instance
