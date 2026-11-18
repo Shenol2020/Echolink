@@ -3,7 +3,8 @@ run_integration_tests.js
 test_redis_simulation.js
 test_suite.js
 .env
-
+node_modules/
+node_modules
 PROJECT_ANALYSIS/
 /run_integration_tests.js
 /test_redis_simulation.js
