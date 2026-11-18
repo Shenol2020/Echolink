@@ -15,7 +15,6 @@
     position: fixed;
     inset: 0;
     background: #000;
-    transition: background-color 60ms linear;
   }
   #overlay {
     position: fixed;
@@ -64,9 +63,9 @@
   const sectionId = Number(params.get('section'));
 
   let ws;
-  let clockOffset = 0;            // best current estimate (ms) to add to local time
-  let offsetHistory = [];         // rolling window, last 5 samples
-  let activeAnimation = null;     // { cancelled: bool } handle for in-flight pattern loops
+  let clockOffset = 0;
+  let offsetHistory = [];
+  let activeAnimation = null;
   let dimTimer = null;
 
   function setStatus(text) {
@@ -79,12 +78,6 @@
     dimTimer = setTimeout(() => overlay.classList.add('dim'), 4000);
   }
 
-  // -----------------------------------------------------------------
-  // Web Worker: keeps sync timers alive even if the tab is backgrounded
-  // or the screen is locked (mobile browsers throttle main-thread
-  // timers aggressively to save battery; workers are largely exempt).
-  // Built inline via Blob so this stays a single file.
-  // -----------------------------------------------------------------
   const workerSrc = `
     let syncIntervalId = null;
     let tickIntervalId = null;
@@ -92,11 +85,8 @@
     self.onmessage = (e) => {
       const { type } = e.data;
       if (type === 'start') {
-        // Ask main thread to run a sync handshake immediately, then every 30s.
         self.postMessage({ type: 'do-sync' });
         syncIntervalId = setInterval(() => self.postMessage({ type: 'do-sync' }), 30000);
-        // 50ms tick drives the main thread's animation/target-time checks
-        // even when requestAnimationFrame would otherwise be throttled.
         tickIntervalId = setInterval(() => self.postMessage({ type: 'tick' }), 50);
       } else if (type === 'stop') {
         clearInterval(syncIntervalId);
@@ -112,10 +102,7 @@
     if (e.data.type === 'tick') checkScheduledExecution();
   };
 
-  // -----------------------------------------------------------------
-  // Clock sync handshake (T1-T4) — see spec in project notes.
-  // -----------------------------------------------------------------
-  let pendingSync = null; // { t1 }
+  let pendingSync = null;
 
   function runSyncHandshake() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -124,28 +111,27 @@
     ws.send(JSON.stringify({ type: 'sync-request', t1 }));
   }
 
+  let syncSamples = [];
+
   function handleSyncResponse(msg) {
     const t4 = Date.now();
     const { t1, t2, t3 } = msg;
     const rtt = (t4 - t1) - (t3 - t2);
     const theta = ((t2 - t1) + (t3 - t4)) / 2;
 
-    offsetHistory.push(theta);
-    if (offsetHistory.length > 5) offsetHistory.shift();
-    clockOffset = offsetHistory.reduce((a, b) => a + b, 0) / offsetHistory.length;
+    syncSamples.push({ theta, rtt });
+    if (syncSamples.length > 5) syncSamples.shift();
 
-    setStatus(`synced · offset ${Math.round(clockOffset)}ms · rtt ${Math.max(0, rtt)}ms`);
+    const bestSample = syncSamples.reduce((best, cur) => (cur.rtt < best.rtt ? cur : best), syncSamples[0]);
+    clockOffset = bestSample.theta;
+
+    setStatus(`synced · offset ${Math.round(clockOffset)}ms · rtt ${Math.max(0, bestSample.rtt)}ms`);
   }
 
   function serverNow() {
     return Date.now() + clockOffset;
   }
 
-  // -----------------------------------------------------------------
-  // WebSocket connection
-  // Fetch /config first so we use the server's declared public WSS URL
-  // rather than deriving it from location.host (breaks behind Azure proxy).
-  // -----------------------------------------------------------------
   async function loadConfigAndConnect() {
     let wsUrl;
     try {
@@ -184,6 +170,7 @@
           canvas.style.backgroundColor = msg.currentColor || '#000';
           worker.postMessage({ type: 'start' });
           resetDimTimer();
+          requestWakeLock();
           break;
         case 'sync-response':
           handleSyncResponse(msg);
@@ -203,11 +190,6 @@
     });
   }
 
-  // -----------------------------------------------------------------
-  // Scheduled execution: wait until our synced clock reaches targetTime,
-  // then hand off to the pattern engine. The worker's 50ms tick keeps
-  // this check alive even when rAF is throttled.
-  // -----------------------------------------------------------------
   let scheduledQueue = [];
 
   function scheduleExecution(command, targetTime) {
@@ -230,9 +212,6 @@
     if (activeAnimation) activeAnimation.cancelled = true;
   }
 
-  // -----------------------------------------------------------------
-  // Pattern engine — mirrors the `mode` values built in control.html
-  // -----------------------------------------------------------------
   function runPattern(cmd) {
     cancelActivePattern();
     resetDimTimer();
@@ -253,7 +232,7 @@
       case 'pulse':
         runContinuous(handle, cmd.durationMs, (elapsed) => {
           const phase = (elapsed % cmd.periodMs) / cmd.periodMs;
-          const brightness = (Math.sin(phase * Math.PI * 2 - Math.PI / 2) + 1) / 2; // 0..1
+          const brightness = (Math.sin(phase * Math.PI * 2 - Math.PI / 2) + 1) / 2;
           canvas.style.backgroundColor = mixWithBlack(cmd.color, brightness);
         }, () => { canvas.style.backgroundColor = '#000000'; });
         break;
@@ -261,7 +240,6 @@
       case 'heartbeat':
         runContinuous(handle, cmd.durationMs, (elapsed) => {
           const phase = (elapsed % cmd.periodMs) / cmd.periodMs;
-          // two quick pulses ("lub-dub") then rest
           let b = 0;
           if (phase < 0.12) b = phase / 0.12;
           else if (phase < 0.22) b = 1 - (phase - 0.12) / 0.10;
@@ -288,7 +266,7 @@
         const idx = order.indexOf(sectionId);
         if (idx === -1) break;
         const n = order.length;
-        const cycleLen = Math.max(1, (n - 1) * 2); // ping-pong path length
+        const cycleLen = Math.max(1, (n - 1) * 2);
         const totalSteps = cycleLen * cmd.loops;
         runTimedLoop(handle, cmd.stepMs * totalSteps, cmd.stepMs, (i) => {
           const pos = i % cycleLen;
@@ -303,10 +281,12 @@
         const idx = order.indexOf(sectionId);
         if (idx === -1) break;
         const isEven = idx % 2 === 0;
+        const colorA = cmd.colorA || cmd.color || '#ffffff';
+        const colorB = cmd.colorB || '#000000';
         runTimedLoop(handle, cmd.durationMs, cmd.intervalMs, (i) => {
           const flip = i % 2 === 0;
           const showA = isEven ? flip : !flip;
-          canvas.style.backgroundColor = showA ? cmd.colorA : cmd.colorB;
+          canvas.style.backgroundColor = showA ? colorA : colorB;
         }, () => { canvas.style.backgroundColor = '#000000'; });
         break;
       }
@@ -318,19 +298,23 @@
         }, () => { canvas.style.backgroundColor = '#000000'; });
         break;
 
-      case 'sparkle':
+      case 'sparkle': {
+        const secColor = cmd.color || '#ff5a36';
+        const palette = (Array.isArray(cmd.palette) && cmd.palette.length > 0)
+          ? cmd.palette
+          : [secColor, '#ffffff', '#000000', secColor];
         runTimedLoop(handle, cmd.durationMs, cmd.intervalMs, () => {
-          const palette = cmd.palette;
           canvas.style.backgroundColor = palette[Math.floor(Math.random() * palette.length)];
         }, () => { canvas.style.backgroundColor = '#000000'; });
         break;
+      }
 
       case 'countdown': {
         let count = cmd.flashes;
         let delay = 600;
         const step = () => {
           if (handle.cancelled || count <= 0) {
-            if (!handle.cancelled) canvas.style.backgroundColor = cmd.color; // hold solid
+            if (!handle.cancelled) canvas.style.backgroundColor = cmd.color;
             return;
           }
           canvas.style.backgroundColor = cmd.color;
@@ -338,7 +322,7 @@
             if (handle.cancelled) return;
             canvas.style.backgroundColor = '#000000';
             count--;
-            delay = Math.max(120, delay * 0.75); // accelerate
+            delay = Math.max(120, delay * 0.75);
             setTimeout(step, delay);
           }, delay * 0.5);
         };
@@ -358,21 +342,22 @@
     }
   }
 
-  // Runs callback(stepIndex) every intervalMs until durationMs elapses.
   function runTimedLoop(handle, durationMs, intervalMs, onStep, onDone) {
     const start = performance.now();
     let i = 0;
     function loop() {
       if (handle.cancelled) return;
-      const elapsed = performance.now() - start;
+      const now = performance.now();
+      const elapsed = now - start;
       if (elapsed >= durationMs) { if (onDone) onDone(); return; }
       onStep(i++);
-      setTimeout(loop, intervalMs);
+      const nextExpected = start + (i * intervalMs);
+      const nextDelay = Math.max(0, nextExpected - performance.now());
+      setTimeout(loop, nextDelay);
     }
     loop();
   }
 
-  // Runs callback(elapsedMs) on every animation frame until durationMs elapses.
   function runContinuous(handle, durationMs, onFrame, onDone) {
     const start = performance.now();
     function loop() {
@@ -385,7 +370,6 @@
     loop();
   }
 
-  // Mixes a hex color toward black by (1 - brightness). brightness 1 = full color, 0 = black.
   function mixWithBlack(hex, brightness) {
     const { r, g, b } = hexToRgb(hex);
     const br = Math.max(0, Math.min(1, brightness));
@@ -400,10 +384,30 @@
     return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
   }
 
-  // Keep the dim overlay reactive to touches (e.g. operator wants the
-  // section label visible briefly without it staying on permanently).
-  document.addEventListener('touchstart', resetDimTimer);
-  document.addEventListener('click', resetDimTimer);
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch {
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (wakeLock === null && document.visibilityState === 'visible') {
+      requestWakeLock();
+    }
+  });
+
+  function onUserInteraction() {
+    resetDimTimer();
+    requestWakeLock();
+  }
+
+  document.addEventListener('touchstart', onUserInteraction);
+  document.addEventListener('click', onUserInteraction);
 
   loadConfigAndConnect();
 })();

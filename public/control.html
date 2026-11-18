@@ -70,7 +70,6 @@
     margin-bottom: 16px;
   }
 
-  /* ── Per-section color rows ──────────────────────────────── */
   .section-color-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -150,7 +149,6 @@
   }
   .apply-section-btn:hover { border-color: var(--accent); color: var(--text); }
 
-  /* ── Apply-all row ───────────────────────────────────────── */
   .apply-all-row {
     display: flex;
     align-items: center;
@@ -171,7 +169,6 @@
   .apply-all-btn:hover { filter: brightness(1.08); }
   .apply-all-note { font-size: 12px; color: var(--muted); }
 
-  /* ── Pattern library ─────────────────────────────────────── */
   .pattern-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -236,7 +233,6 @@
     <div class="conn-badge" id="conn-badge">Connecting…</div>
   </div>
 
-  <!-- Per-section colors -->
   <section class="block">
     <div class="block-title">Section colors</div>
     <div class="section-color-grid" id="section-color-grid">
@@ -248,7 +244,6 @@
     </div>
   </section>
 
-  <!-- Synchronized patterns (shared — uses each section's own color) -->
   <section class="block">
     <div class="block-title">Synchronized patterns</div>
     <p class="pattern-note">
@@ -280,27 +275,23 @@
     '#06d6a0', '#ffd166', '#fb8500', '#ffffff', '#000000',
   ];
 
-  // sectionColors: { [id]: string } — the current color per section (from the pickers)
   let sections     = [];
-  let sectionColors = {}; // id -> hex color string
+  let sectionColors = {};
   let ws;
-  let wsUrl = null; // resolved from /config
+  let wsUrl = null;
 
-  // ── Config fetch ────────────────────────────────────────────────────
   async function loadConfig() {
     try {
       const res  = await fetch('/config');
       const cfg  = await res.json();
       wsUrl = cfg.wsUrl;
     } catch {
-      // Fall back to deriving from current location (local dev)
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       wsUrl = `${proto}://${location.host}/ws`;
     }
     connect();
   }
 
-  // ── WebSocket ────────────────────────────────────────────────────────
   function connect() {
     ws = new WebSocket(wsUrl);
 
@@ -320,7 +311,6 @@
       const msg = JSON.parse(event.data);
       if (msg.type === 'sections-ready' || msg.type === 'section-update') {
         sections = msg.sections;
-        // Preserve any colors already chosen; default new sections to their last known color.
         sections.forEach((s) => {
           if (!sectionColors[s.id]) sectionColors[s.id] = s.lastColor || '#ff5a36';
         });
@@ -329,21 +319,40 @@
     });
   }
 
-  // ── Per-section color grid ───────────────────────────────────────────
   function renderColorGrid() {
     if (!sections.length) {
       colorGrid.innerHTML = '<p class="empty-note">No sections yet — go to the dashboard first.</p>';
       return;
     }
-    colorGrid.innerHTML = '';
+    const emptyNote = colorGrid.querySelector('.empty-note');
+    if (emptyNote) emptyNote.remove();
+
+    const activeIds = new Set(sections.map(s => String(s.id)));
+    colorGrid.querySelectorAll('.section-color-card').forEach((card) => {
+      if (!activeIds.has(card.dataset.sectionId)) card.remove();
+    });
+
     sections.forEach((s) => {
       const color = sectionColors[s.id] || '#ff5a36';
+      let card = colorGrid.querySelector(`.section-color-card[data-section-id="${s.id}"]`);
 
-      const card = document.createElement('div');
+      if (card) {
+        const nameEl = card.querySelector('.sc-name');
+        if (nameEl && nameEl.textContent !== s.name) nameEl.textContent = s.name;
+        const metaEl = card.querySelector('.sc-meta');
+        if (metaEl) {
+          metaEl.innerHTML = `
+            <span class="swatch-dot" style="background:${s.lastColor}"></span>
+            ${s.connected} connected
+          `;
+        }
+        return;
+      }
+
+      card = document.createElement('div');
       card.className = 'section-color-card';
       card.dataset.sectionId = s.id;
 
-      // Header: name + live connection count
       const header = document.createElement('div');
       header.className = 'sc-header';
       header.innerHTML = `
@@ -354,7 +363,6 @@
         </span>
       `;
 
-      // Color picker + "Apply" button
       const pickerRow = document.createElement('div');
       pickerRow.className = 'sc-picker-row';
 
@@ -376,7 +384,6 @@
       pickerRow.appendChild(picker);
       pickerRow.appendChild(applyBtn);
 
-      // Quick-swatch row
       const swatchRow = document.createElement('div');
       swatchRow.className = 'sc-swatch-row';
       PRESET_COLORS.forEach((c) => {
@@ -399,7 +406,6 @@
     });
   }
 
-  // Send a single section's color immediately (no scheduling).
   function sendColorForSection(sectionId, color) {
     ws.send(JSON.stringify({
       type: 'set-color',
@@ -407,7 +413,6 @@
     }));
   }
 
-  // Send all sections' colors in one batch message.
   applyAllBtn.addEventListener('click', () => {
     const updates = sections.map((s) => ({
       sectionId: s.id,
@@ -416,22 +421,17 @@
     ws.send(JSON.stringify({ type: 'set-color', updates }));
   });
 
-  // ── Helpers ──────────────────────────────────────────────────────────
   leadMsSlider.addEventListener('input', () => {
     leadMsLabel.textContent = `${leadMsSlider.value} ms`;
   });
   function currentLeadMs() { return Number(leadMsSlider.value); }
 
-  // Build a sectionColors map from current picker state.
   function currentSectionColors() {
     const map = {};
     sections.forEach((s) => { map[s.id] = sectionColors[s.id] || '#ff5a36'; });
     return map;
   }
 
-  // ── Pattern library ──────────────────────────────────────────────────
-  // Each pattern sends a scheduled-command for ALL sections.
-  // The server injects each section's own color (from sectionColors) before delivering.
   const PATTERNS = [
     {
       id: 'solid',
@@ -475,7 +475,7 @@
       desc: 'Odd and even sections alternate between their color and black.',
       build: () => ({
         mode: 'alternate',
-        colorB: '#000000', // colorA comes from per-section injection
+        colorB: '#000000',
         order: sections.map(s => s.id), intervalMs: 300, durationMs: 6000,
       }),
     },
@@ -524,7 +524,7 @@
         type: 'scheduled-command',
         targets: 'all',
         command: p.build(),
-        sectionColors: currentSectionColors(), // per-section color map
+        sectionColors: currentSectionColors(),
         leadMs: currentLeadMs(),
       }));
       setTimeout(() => card.classList.remove('firing'), 600);

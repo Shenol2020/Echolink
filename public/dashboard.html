@@ -219,8 +219,6 @@
     btn.addEventListener('click', () => { countInput.value = btn.dataset.count; });
   });
 
-  // Fetch server config first so QR codes encode the correct public URL,
-  // not just location.host (which may be an internal Azure address).
   async function loadConfig() {
     try {
       const res = await fetch('/config');
@@ -276,7 +274,6 @@
 
   function renderQRCodes(sections) {
     qrGrid.innerHTML = '';
-    // Use the server-reported public URL so QR codes work outside the local LAN.
     const baseUrl = `${publicUrl}/phone`;
 
     sections.forEach((section) => {
@@ -308,13 +305,16 @@
       card.appendChild(link);
       qrGrid.appendChild(card);
 
-      // eslint-disable-next-line no-undef
-      new QRCode(qrWrap, {
-        text: url,
-        width: 160, height: 160,
-        colorDark: '#0b0d10', colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.M,
-      });
+      if (typeof QRCode !== 'undefined') {
+        new QRCode(qrWrap, {
+          text: url,
+          width: 160, height: 160,
+          colorDark: '#0b0d10', colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel.M,
+        });
+      } else {
+        qrWrap.innerHTML = '<div style="padding:24px 8px;font-size:11px;color:#ff5a36;text-align:center;">QR library offline.<br>Use link below.</div>';
+      }
     });
   }
 
