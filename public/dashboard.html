@@ -243,8 +243,7 @@
       statusLine.textContent = 'Connected to server.';
       statusLine.className   = 'status-line connected';
       generateBtn.disabled   = false;
-      const token = sessionStorage.getItem('echolink_token');
-      if (token) ws.send(JSON.stringify({ type: 'operator-auth', token }));
+      ws.send(JSON.stringify({ type: 'operator-auth' }));
     });
 
     ws.addEventListener('close', () => {
@@ -279,8 +278,7 @@
   generateBtn.addEventListener('click', () => {
     const count = Math.max(1, Math.min(50, parseInt(countInput.value, 10) || 1));
     if (ws && ws.readyState === WebSocket.OPEN) {
-      const token = sessionStorage.getItem('echolink_token');
-      ws.send(JSON.stringify({ type: 'init-sections', count, token }));
+      ws.send(JSON.stringify({ type: 'init-sections', count }));
     }
   });
 
@@ -335,7 +333,6 @@
     logoutBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       try { await fetch('/api/logout', { method: 'POST' }); } catch {}
-      sessionStorage.removeItem('echolink_token');
       window.location.href = '/login';
     });
   }

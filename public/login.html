@@ -160,9 +160,6 @@
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        if (data.token) {
-          sessionStorage.setItem('echolink_token', data.token);
-        }
         window.location.href = redirectTarget;
       } else {
         errorMsg.textContent = data.message || 'Incorrect passcode. Access denied.';

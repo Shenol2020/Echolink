@@ -301,8 +301,7 @@
     ws.addEventListener('open', () => {
       connBadge.textContent = 'Connected';
       connBadge.className   = 'conn-badge connected';
-      const token = sessionStorage.getItem('echolink_token');
-      ws.send(JSON.stringify({ type: 'operator-join', token }));
+      ws.send(JSON.stringify({ type: 'operator-join' }));
     });
 
     ws.addEventListener('close', () => {
@@ -417,21 +416,18 @@
   }
 
   function sendColorForSection(sectionId, color) {
-    const token = sessionStorage.getItem('echolink_token');
     ws.send(JSON.stringify({
       type: 'set-color',
       updates: [{ sectionId, color }],
-      token,
     }));
   }
 
   applyAllBtn.addEventListener('click', () => {
-    const token = sessionStorage.getItem('echolink_token');
     const updates = sections.map((s) => ({
       sectionId: s.id,
       color: sectionColors[s.id] || '#000000',
     }));
-    ws.send(JSON.stringify({ type: 'set-color', updates, token }));
+    ws.send(JSON.stringify({ type: 'set-color', updates }));
   });
 
   leadMsSlider.addEventListener('input', () => {
@@ -533,14 +529,12 @@
     card.addEventListener('click', () => {
       document.querySelectorAll('.pattern-card').forEach(c => c.classList.remove('firing'));
       card.classList.add('firing');
-      const token = sessionStorage.getItem('echolink_token');
       ws.send(JSON.stringify({
         type: 'scheduled-command',
         targets: 'all',
         command: p.build(),
         sectionColors: currentSectionColors(),
         leadMs: currentLeadMs(),
-        token,
       }));
       setTimeout(() => card.classList.remove('firing'), 600);
     });
@@ -548,13 +542,11 @@
   });
 
   stopBtn.addEventListener('click', () => {
-    const token = sessionStorage.getItem('echolink_token');
     ws.send(JSON.stringify({
       type: 'scheduled-command',
       targets: 'all',
       command: { mode: 'solid', color: '#000000' },
       leadMs: 200,
-      token,
     }));
   });
 
@@ -563,7 +555,6 @@
     logoutBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       try { await fetch('/api/logout', { method: 'POST' }); } catch {}
-      sessionStorage.removeItem('echolink_token');
       window.location.href = '/login';
     });
   }

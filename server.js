@@ -14,54 +14,109 @@ if (!OPERATOR_PASSWORD) {
   console.error('[FATAL] OPERATOR_PASSWORD environment variable is required.');
   process.exit(1);
 }
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET || typeof SESSION_SECRET !== 'string' || SESSION_SECRET.length < 32) {
+  console.error('[FATAL] SESSION_SECRET environment variable is required and must be at least 32 characters long.');
+  process.exit(1);
+}
 
 const REDIS_CHANNEL = 'crowd-lights';
 const INSTANCE_ID   = crypto.randomBytes(8).toString('hex') + Date.now().toString(36);
 
-const loginAttempts = new Map();
-const RATE_LIMIT_WINDOW_MS = 60000;
-const MAX_ATTEMPTS = 5;
-const LOCKOUT_MS = 300000;
+let parsedPublicUrl = null;
+try {
+  parsedPublicUrl = new URL(PUBLIC_URL);
+} catch (e) {
+  console.error('[FATAL] Invalid PUBLIC_URL:', PUBLIC_URL);
+  process.exit(1);
+}
 
-function checkRateLimit(ip) {
+const RATE_LIMIT_WINDOW_SEC = 60;
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_SEC = 300;
+const localLoginAttempts = new Map();
+
+async function checkRateLimit(ip) {
+  if (redisData && redisData.status === 'ready') {
+    const key = `echolink:ratelimit:${ip}`;
+    try {
+      const data = await redisData.hgetall(key);
+      const now = Date.now();
+      const lockedUntil = Number(data.lockedUntil) || 0;
+      if (lockedUntil > now) {
+        const remainingSec = Math.ceil((lockedUntil - now) / 1000);
+        return { allowed: false, remainingSec };
+      }
+      return { allowed: true };
+    } catch (e) {
+      console.error('[ratelimit redis check error]', e.message);
+    }
+  }
+
   const now = Date.now();
-  let record = loginAttempts.get(ip);
+  let record = localLoginAttempts.get(ip);
   if (!record) {
     record = { count: 0, firstAttempt: now, lockedUntil: 0 };
-    loginAttempts.set(ip, record);
+    localLoginAttempts.set(ip, record);
   }
   if (record.lockedUntil > now) {
     const remainingSec = Math.ceil((record.lockedUntil - now) / 1000);
     return { allowed: false, remainingSec };
   }
-  if (now - record.firstAttempt > RATE_LIMIT_WINDOW_MS) {
+  if (now - record.firstAttempt > RATE_LIMIT_WINDOW_SEC * 1000) {
     record.count = 0;
     record.firstAttempt = now;
   }
   return { allowed: true, record };
 }
 
-function recordLoginFailure(ip) {
+async function recordLoginFailure(ip) {
+  if (redisData && redisData.status === 'ready') {
+    const key = `echolink:ratelimit:${ip}`;
+    try {
+      const now = Date.now();
+      const count = await redisData.hincrby(key, 'count', 1);
+      if (count === 1) {
+        await redisData.expire(key, RATE_LIMIT_WINDOW_SEC);
+      }
+      if (count >= MAX_ATTEMPTS) {
+        const lockedUntil = now + (LOCKOUT_SEC * 1000);
+        await redisData.hset(key, 'lockedUntil', String(lockedUntil));
+        await redisData.expire(key, LOCKOUT_SEC);
+      }
+      return;
+    } catch (e) {
+      console.error('[ratelimit redis record error]', e.message);
+    }
+  }
+
   const now = Date.now();
-  const entry = loginAttempts.get(ip);
+  const entry = localLoginAttempts.get(ip);
   if (entry) {
     entry.count++;
     if (entry.count >= MAX_ATTEMPTS) {
-      entry.lockedUntil = now + LOCKOUT_MS;
+      entry.lockedUntil = now + (LOCKOUT_SEC * 1000);
     }
   }
 }
 
-function resetLoginRateLimit(ip) {
-  loginAttempts.delete(ip);
+async function resetLoginRateLimit(ip) {
+  if (redisData && redisData.status === 'ready') {
+    try {
+      await redisData.del(`echolink:ratelimit:${ip}`);
+    } catch (e) {
+      console.error('[ratelimit redis reset error]', e.message);
+    }
+  }
+  localLoginAttempts.delete(ip);
 }
 
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, entry] of loginAttempts.entries()) {
-    if (entry.lockedUntil < now && now - entry.firstAttempt > RATE_LIMIT_WINDOW_MS) {
-      loginAttempts.delete(ip);
+  for (const [ip, entry] of localLoginAttempts.entries()) {
+    if (entry.lockedUntil < now && now - entry.firstAttempt > RATE_LIMIT_WINDOW_SEC * 1000) {
+      localLoginAttempts.delete(ip);
     }
   }
 }, 60000);
@@ -89,7 +144,9 @@ function verifyToken(token) {
   if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return null;
   try {
     const payload = JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
-    if (payload.exp && Date.now() > payload.exp) return null;
+    if (!payload.exp || Date.now() >= payload.exp) {
+      return null;
+    }
     return payload;
   } catch {
     return null;
@@ -107,6 +164,26 @@ function parseCookies(cookieHeader) {
   return list;
 }
 
+function isRequestSecure(req) {
+  if (req.socket.encrypted === true) return true;
+  const proto = req.headers['x-forwarded-proto'];
+  if (proto) {
+    const firstProto = proto.split(',')[0].trim().toLowerCase();
+    if (firstProto === 'https') return true;
+  }
+  const arrSsl = req.headers['x-arr-ssl'];
+  if (arrSsl) return true;
+  return false;
+}
+
+function buildAuthCookie(token, isSecure) {
+  const flags = ['Path=/', 'HttpOnly', 'SameSite=Strict', 'Max-Age=86400'];
+  if (isSecure) {
+    flags.push('Secure');
+  }
+  return `echolink_auth=${token}; ${flags.join('; ')}`;
+}
+
 function sanitizeRedirect(target) {
   if (typeof target !== 'string') return '/dashboard';
   const trimmed = target.trim();
@@ -116,12 +193,24 @@ function sanitizeRedirect(target) {
   return '/dashboard';
 }
 
-function buildAuthCookie(token, isSecure) {
-  const flags = ['Path=/', 'HttpOnly', 'SameSite=Strict', 'Max-Age=86400'];
-  if (isSecure) {
-    flags.push('Secure');
+function isOriginAllowed(originHeader, reqHost) {
+  if (!originHeader) return true;
+  let originUrl;
+  try {
+    originUrl = new URL(originHeader);
+  } catch {
+    return false;
   }
-  return `echolink_auth=${token}; ${flags.join('; ')}`;
+
+  if (originUrl.host === parsedPublicUrl.host) return true;
+  if (reqHost && originUrl.host === reqHost) return true;
+
+  const originHostname = originUrl.hostname.toLowerCase();
+  if (originHostname === 'localhost' || originHostname === '127.0.0.1' || originHostname === '::1') {
+    return true;
+  }
+
+  return false;
 }
 
 let redisPub  = null;
@@ -422,11 +511,11 @@ function serveFile(res, filePath) {
   });
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   const clientIp = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
-  const isSecure = req.headers['x-forwarded-proto'] === 'https' || req.socket.encrypted === true;
+  const isSecure = isRequestSecure(req);
 
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -441,7 +530,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/login' && req.method === 'POST') {
-    const rateCheck = checkRateLimit(clientIp);
+    const rateCheck = await checkRateLimit(clientIp);
     if (!rateCheck.allowed) {
       res.writeHead(429, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -453,17 +542,17 @@ const server = http.createServer((req, res) => {
 
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
+    req.on('end', async () => {
       let data = {};
       try { data = JSON.parse(body); } catch {}
       if (safeCompare(data.password, OPERATOR_PASSWORD)) {
-        resetLoginRateLimit(clientIp);
+        await resetLoginRateLimit(clientIp);
         const token = signToken({ role: 'operator', exp: Date.now() + 24 * 3600 * 1000 });
         res.setHeader('Set-Cookie', buildAuthCookie(token, isSecure));
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, token }));
+        res.end(JSON.stringify({ success: true }));
       } else {
-        recordLoginFailure(clientIp);
+        await recordLoginFailure(clientIp);
         res.writeHead(401, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, message: 'Invalid passcode.' }));
       }
@@ -525,11 +614,20 @@ wss.on('connection', (ws, req) => {
   ws.isAlive    = true;
   ws.isOperator = false;
 
+  const originHeader = req.headers.origin;
+  const reqHost = req.headers.host;
+  const originValid = isOriginAllowed(originHeader, reqHost);
+  ws.originValid = originValid;
+
   const cookies = parseCookies(req.headers.cookie);
   const auth = verifyToken(cookies.echolink_auth);
   if (auth && auth.role === 'operator') {
-    ws.isOperator = true;
-    ws.role       = 'operator';
+    if (originValid) {
+      ws.isOperator = true;
+      ws.role       = 'operator';
+    } else {
+      console.warn(`[security] Rejected operator privileges for socket from unauthorized origin: ${originHeader}`);
+    }
   }
 
   ws.on('pong', () => { ws.isAlive = true; });
@@ -567,8 +665,10 @@ function handleMessage(ws, msg) {
   if (msg.token) {
     const auth = verifyToken(msg.token);
     if (auth && auth.role === 'operator') {
-      ws.isOperator = true;
-      ws.role       = 'operator';
+      if (ws.originValid !== false) {
+        ws.isOperator = true;
+        ws.role       = 'operator';
+      }
     }
   }
 
@@ -583,7 +683,7 @@ function handleMessage(ws, msg) {
           sections: sectionSummary(),
         }));
       } else {
-        ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized: Invalid token.' }));
+        ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized: Operator credentials required.' }));
       }
       break;
     }
