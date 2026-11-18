@@ -230,7 +230,10 @@
       <div class="eyebrow">Crowd Lights · Control</div>
       <h1>Live session control</h1>
     </div>
-    <div class="conn-badge" id="conn-badge">Connecting…</div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div class="conn-badge" id="conn-badge">Connecting…</div>
+      <a href="/login" id="logout-btn" style="color:var(--muted);font-family:var(--mono);font-size:12px;text-decoration:none;border:1px solid var(--line);padding:6px 12px;border-radius:100px;">Log out</a>
+    </div>
   </div>
 
   <section class="block">
@@ -298,7 +301,8 @@
     ws.addEventListener('open', () => {
       connBadge.textContent = 'Connected';
       connBadge.className   = 'conn-badge connected';
-      ws.send(JSON.stringify({ type: 'operator-join' }));
+      const token = sessionStorage.getItem('echolink_token');
+      ws.send(JSON.stringify({ type: 'operator-join', token }));
     });
 
     ws.addEventListener('close', () => {
@@ -315,6 +319,12 @@
           if (!sectionColors[s.id]) sectionColors[s.id] = s.lastColor || '#ff5a36';
         });
         renderColorGrid();
+      } else if (msg.type === 'error') {
+        if (msg.message && msg.message.toLowerCase().includes('unauthorized')) {
+          connBadge.textContent = 'Unauthorized';
+          connBadge.className   = 'conn-badge error';
+          setTimeout(() => { window.location.href = '/login?redirect=' + encodeURIComponent(location.pathname); }, 1500);
+        }
       }
     });
   }
@@ -407,18 +417,21 @@
   }
 
   function sendColorForSection(sectionId, color) {
+    const token = sessionStorage.getItem('echolink_token');
     ws.send(JSON.stringify({
       type: 'set-color',
       updates: [{ sectionId, color }],
+      token,
     }));
   }
 
   applyAllBtn.addEventListener('click', () => {
+    const token = sessionStorage.getItem('echolink_token');
     const updates = sections.map((s) => ({
       sectionId: s.id,
       color: sectionColors[s.id] || '#000000',
     }));
-    ws.send(JSON.stringify({ type: 'set-color', updates }));
+    ws.send(JSON.stringify({ type: 'set-color', updates, token }));
   });
 
   leadMsSlider.addEventListener('input', () => {
@@ -520,12 +533,14 @@
     card.addEventListener('click', () => {
       document.querySelectorAll('.pattern-card').forEach(c => c.classList.remove('firing'));
       card.classList.add('firing');
+      const token = sessionStorage.getItem('echolink_token');
       ws.send(JSON.stringify({
         type: 'scheduled-command',
         targets: 'all',
         command: p.build(),
         sectionColors: currentSectionColors(),
         leadMs: currentLeadMs(),
+        token,
       }));
       setTimeout(() => card.classList.remove('firing'), 600);
     });
@@ -533,13 +548,25 @@
   });
 
   stopBtn.addEventListener('click', () => {
+    const token = sessionStorage.getItem('echolink_token');
     ws.send(JSON.stringify({
       type: 'scheduled-command',
       targets: 'all',
       command: { mode: 'solid', color: '#000000' },
       leadMs: 200,
+      token,
     }));
   });
+
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+      sessionStorage.removeItem('echolink_token');
+      window.location.href = '/login';
+    });
+  }
 
   loadConfig();
 })();

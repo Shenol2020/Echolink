@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Crowd Lights — Session Setup</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/qrcode.min.js"></script>
 <style>
   :root {
     --bg: #0b0d10;
@@ -177,7 +177,10 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="eyebrow">Crowd Lights · Session Setup</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <div class="eyebrow">Crowd Lights · Session Setup</div>
+    <a href="/login" id="logout-btn" style="color:var(--muted);font-family:var(--mono);font-size:12px;text-decoration:none;border:1px solid var(--line);padding:4px 10px;border-radius:6px;">Log out</a>
+  </div>
   <h1>How many sections tonight?</h1>
   <p class="sub">Each section gets its own QR code. Point a section of the crowd at the matching code — their phones become that section's light panel.</p>
 
@@ -240,6 +243,8 @@
       statusLine.textContent = 'Connected to server.';
       statusLine.className   = 'status-line connected';
       generateBtn.disabled   = false;
+      const token = sessionStorage.getItem('echolink_token');
+      if (token) ws.send(JSON.stringify({ type: 'operator-auth', token }));
     });
 
     ws.addEventListener('close', () => {
@@ -261,6 +266,12 @@
         nextBar.classList.add('visible');
         statusLine.textContent = `${msg.count} section(s) initialized.`;
         statusLine.className   = 'status-line connected';
+      } else if (msg.type === 'error') {
+        statusLine.textContent = msg.message;
+        statusLine.className   = 'status-line error';
+        if (msg.message && msg.message.toLowerCase().includes('unauthorized')) {
+          setTimeout(() => { window.location.href = '/login?redirect=' + encodeURIComponent(location.pathname); }, 1500);
+        }
       }
     });
   }
@@ -268,7 +279,8 @@
   generateBtn.addEventListener('click', () => {
     const count = Math.max(1, Math.min(50, parseInt(countInput.value, 10) || 1));
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'init-sections', count }));
+      const token = sessionStorage.getItem('echolink_token');
+      ws.send(JSON.stringify({ type: 'init-sections', count, token }));
     }
   });
 
@@ -315,6 +327,16 @@
       } else {
         qrWrap.innerHTML = '<div style="padding:24px 8px;font-size:11px;color:#ff5a36;text-align:center;">QR library offline.<br>Use link below.</div>';
       }
+    });
+  }
+
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+      sessionStorage.removeItem('echolink_token');
+      window.location.href = '/login';
     });
   }
 
