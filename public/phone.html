@@ -64,9 +64,11 @@
 
   let ws;
   let clockOffset = 0;
-  let offsetHistory = [];
   let activeAnimation = null;
   let dimTimer = null;
+  let reconnectAttempts = 0;
+  let reconnectTimer = null;
+  let lastSyncTime = 0;
 
   function setStatus(text) {
     statusLabel.textContent = text;
@@ -98,17 +100,16 @@
   const worker = new Worker(URL.createObjectURL(workerBlob));
 
   worker.onmessage = (e) => {
-    if (e.data.type === 'do-sync') runSyncHandshake();
+    if (e.data.type === 'do-sync') runSyncHandshakeThrottled();
     if (e.data.type === 'tick') checkScheduledExecution();
   };
 
-  let pendingSync = null;
-
-  function runSyncHandshake() {
+  function runSyncHandshakeThrottled() {
+    const now = Date.now();
+    if (now - lastSyncTime < 100) return;
+    lastSyncTime = now;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const t1 = Date.now();
-    pendingSync = { t1 };
-    ws.send(JSON.stringify({ type: 'sync-request', t1 }));
+    ws.send(JSON.stringify({ type: 'sync-request', t1: now }));
   }
 
   let syncSamples = [];
@@ -145,10 +146,23 @@
     connect(wsUrl);
   }
 
+  function scheduleReconnect(wsUrl) {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectAttempts++;
+    const base = Math.min(800 * Math.pow(1.5, reconnectAttempts - 1), 15000);
+    const jitter = Math.floor(Math.random() * 500);
+    const delay = Math.round(base + jitter);
+    sectionLabel.textContent = 'Disconnected';
+    setStatus(`Reconnecting (#${reconnectAttempts} in ${(delay / 1000).toFixed(1)}s)…`);
+    reconnectTimer = setTimeout(() => connect(wsUrl), delay);
+  }
+
   function connect(wsUrl) {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     ws = new WebSocket(wsUrl);
 
     ws.addEventListener('open', () => {
+      reconnectAttempts = 0;
       if (!sectionId) {
         sectionLabel.textContent = 'No section specified';
         setStatus('Scan a valid section QR code.');
@@ -158,8 +172,11 @@
     });
 
     ws.addEventListener('close', () => {
-      sectionLabel.textContent = 'Disconnected — reconnecting…';
-      setTimeout(() => connect(wsUrl), 1500);
+      scheduleReconnect(wsUrl);
+    });
+
+    ws.addEventListener('error', () => {
+      setStatus('Connection error');
     });
 
     ws.addEventListener('message', (event) => {

@@ -217,6 +217,8 @@
   let wsUrl     = null;
   let publicUrl = null;
   let ws;
+  let reconnectAttempts = 0;
+  let reconnectTimer = null;
 
   document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => { countInput.value = btn.dataset.count; });
@@ -236,10 +238,24 @@
     connect();
   }
 
+  function scheduleReconnect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectAttempts++;
+    const base = Math.min(1000 * Math.pow(1.5, reconnectAttempts - 1), 15000);
+    const jitter = Math.floor(Math.random() * 500);
+    const delay = Math.round(base + jitter);
+    statusLine.textContent = `Disconnected. Retrying (#${reconnectAttempts} in ${(delay / 1000).toFixed(1)}s)…`;
+    statusLine.className   = 'status-line error';
+    generateBtn.disabled   = true;
+    reconnectTimer = setTimeout(connect, delay);
+  }
+
   function connect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     ws = new WebSocket(wsUrl);
 
     ws.addEventListener('open', () => {
+      reconnectAttempts = 0;
       statusLine.textContent = 'Connected to server.';
       statusLine.className   = 'status-line connected';
       generateBtn.disabled   = false;
@@ -247,10 +263,7 @@
     });
 
     ws.addEventListener('close', () => {
-      statusLine.textContent = 'Disconnected. Retrying…';
-      statusLine.className   = 'status-line error';
-      generateBtn.disabled   = true;
-      setTimeout(connect, 1500);
+      scheduleReconnect();
     });
 
     ws.addEventListener('error', () => {

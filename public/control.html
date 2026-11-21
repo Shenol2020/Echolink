@@ -282,6 +282,28 @@
   let sectionColors = {};
   let ws;
   let wsUrl = null;
+  let reconnectAttempts = 0;
+  let reconnectTimer = null;
+
+  const colorThrottleMap = new Map();
+
+  function sendColorThrottled(sectionId, color) {
+    sectionColors[sectionId] = color;
+    let entry = colorThrottleMap.get(sectionId);
+    if (!entry) {
+      entry = { timer: null, lastSent: 0, pendingColor: color };
+      colorThrottleMap.set(sectionId, entry);
+    }
+    entry.pendingColor = color;
+    const now = Date.now();
+    const wait = Math.max(0, 75 - (now - entry.lastSent));
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => {
+      entry.lastSent = Date.now();
+      entry.timer = null;
+      sendColorForSection(sectionId, entry.pendingColor);
+    }, wait);
+  }
 
   async function loadConfig() {
     try {
@@ -295,19 +317,35 @@
     connect();
   }
 
+  function scheduleReconnect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectAttempts++;
+    const base = Math.min(1000 * Math.pow(1.5, reconnectAttempts - 1), 15000);
+    const jitter = Math.floor(Math.random() * 500);
+    const delay = Math.round(base + jitter);
+    connBadge.textContent = `Reconnecting (#${reconnectAttempts} in ${(delay / 1000).toFixed(1)}s)…`;
+    connBadge.className   = 'conn-badge error';
+    reconnectTimer = setTimeout(connect, delay);
+  }
+
   function connect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     ws = new WebSocket(wsUrl);
 
     ws.addEventListener('open', () => {
+      reconnectAttempts = 0;
       connBadge.textContent = 'Connected';
       connBadge.className   = 'conn-badge connected';
       ws.send(JSON.stringify({ type: 'operator-join' }));
     });
 
     ws.addEventListener('close', () => {
-      connBadge.textContent = 'Disconnected — retrying…';
+      scheduleReconnect();
+    });
+
+    ws.addEventListener('error', () => {
+      connBadge.textContent = 'Connection error';
       connBadge.className   = 'conn-badge error';
-      setTimeout(connect, 1500);
     });
 
     ws.addEventListener('message', (event) => {
@@ -380,7 +418,7 @@
       picker.value = color;
       picker.dataset.sectionId = s.id;
       picker.addEventListener('input', () => {
-        sectionColors[s.id] = picker.value;
+        sendColorThrottled(s.id, picker.value);
       });
 
       const applyBtn = document.createElement('button');
@@ -402,8 +440,7 @@
         btn.title            = c;
         btn.addEventListener('click', () => {
           picker.value        = c;
-          sectionColors[s.id] = c;
-          sendColorForSection(s.id, c);
+          sendColorThrottled(s.id, c);
         });
         swatchRow.appendChild(btn);
       });
@@ -416,6 +453,7 @@
   }
 
   function sendColorForSection(sectionId, color) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({
       type: 'set-color',
       updates: [{ sectionId, color }],
@@ -423,6 +461,7 @@
   }
 
   applyAllBtn.addEventListener('click', () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const updates = sections.map((s) => ({
       sectionId: s.id,
       color: sectionColors[s.id] || '#000000',
@@ -527,6 +566,7 @@
     card.className = 'pattern-card';
     card.innerHTML = `<div class="pname">${p.name}</div><div class="pdesc">${p.desc}</div>`;
     card.addEventListener('click', () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
       document.querySelectorAll('.pattern-card').forEach(c => c.classList.remove('firing'));
       card.classList.add('firing');
       ws.send(JSON.stringify({
@@ -542,6 +582,7 @@
   });
 
   stopBtn.addEventListener('click', () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({
       type: 'scheduled-command',
       targets: 'all',
